@@ -5,21 +5,9 @@ import model500 from "../assets/models-with-logo/500ml_round.glb";
 import model750 from "../assets/models-with-logo/750ml_round.glb";
 import model1000 from "../assets/models-with-logo/50ml_hinged_container.glb";
 
-import model120A from "../assets/models/120ml_round.glb";
-import model250A from "../assets/models/250ml_round.glb";
-import model500A from "../assets/models/500ml_round.glb";
-import model750A from "../assets/models/750ml_round.glb";
-import model1000A from "../assets/models/50ml_hinged_container.glb";
-
-
-
 import roundbrown from "../assets/patterns/round_brown.png";
 import roundgreen from "../assets/patterns/round_green.png";
 import roundmix from "../assets/patterns/round_mix.png";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
-import Label from "./Label"; // Assuming Label.jsx is in the same folder
-
 
 export default function ModelViewer() {
   const modelRef = useRef(null);
@@ -28,36 +16,6 @@ export default function ModelViewer() {
   const [bottomColor, setBottomColor] = useState(null);
   const [modelLoaded, setModelLoaded] = useState(false);
   const [selectedModel, setSelectedModel] = useState(model120);
-  const [bgColor, setBgColor] = useState("#e5e7eb"); // Background color state
-  const [displayModel, setDisplayModel] = useState(model120); // Track actual model being displayed
-  const [currentView, setCurrentView] = useState("home"); // View State: 'home' or 'label'
-  const [customLabelTexture, setCustomLabelTexture] = useState(null); // Texture State: Stores the image generated from the Label page
-  const [openCategory, setOpenCategory] = useState(null);
-  const [selectedPattern, setSelectedPattern] = useState(null);
-
-  // Model mapping: with-logo and without-logo versions
-  const modelMap = {
-    [model120]: { withLogo: model120, withoutLogo: model120A },
-    [model250]: { withLogo: model250, withoutLogo: model250A },
-    [model500]: { withLogo: model500, withoutLogo: model500A },
-    [model750]: { withLogo: model750, withoutLogo: model750A },
-    [model1000]: { withLogo: model1000, withoutLogo: model1000A },
-  };
-
-  // Get current model variant (with or without logo)
-  const getCurrentModel = () => {
-    const mapping = modelMap[selectedModel];
-    if (!mapping) return selectedModel;
-    // Use without-logo model when pattern is active
-    return selectedPattern || customLabelTexture ? mapping.withoutLogo : mapping.withLogo;
-  };
-
-  // Update displayModel whenever the current model changes
-  useEffect(() => {
-    const newModel = getCurrentModel();
-    setDisplayModel(newModel);
-    setModelLoaded(false);
-  }, [selectedModel, selectedPattern, customLabelTexture]);
 
   const models = [
     { name: "120ml Round", path: model120 },
@@ -123,7 +81,11 @@ export default function ModelViewer() {
     },
   ];
 
+  const [openCategory, setOpenCategory] = useState(null);
+
   const patterns = [roundbrown, roundgreen, roundmix];
+
+  const [selectedPattern, setSelectedPattern] = useState(null);
 
   // Helper: Convert hex to RGB normalized (0-1)
   const hexToRgba = (hex) => {
@@ -188,9 +150,8 @@ const applyColorToMaterial = (material, hexColor) => {
     return () => mv.removeEventListener("load", handleLoad);
   }, [selectedModel]); // Added selectedModel dependency
 
- 
-
-
+  // Apply TOP color
+// Apply TOP color (Lid)
 // Apply TOP color
 useEffect(() => {
   // 🛑 STOP if model isn't loaded OR if user hasn't picked a color yet
@@ -207,12 +168,9 @@ useEffect(() => {
       applyColorToMaterial(material, topColor); 
     }
   });
-}, [topColor, modelLoaded, displayModel]);
+}, [topColor, modelLoaded]);
 
-
-
-
-
+  // Apply BOTTOM color (Tub)
 // Apply BOTTOM color
 useEffect(() => {
   // 🛑 STOP if model isn't loaded OR if user hasn't picked a color yet
@@ -225,11 +183,8 @@ useEffect(() => {
   materials.forEach((material) => {
     const name = material.name.toLowerCase();
     
-    // NEVER apply bottom color to logo materials
-    if (name.includes("logo")) return;
-    
     // Skip texture area if pattern is applied
-    if (name === "texture_area" && (selectedPattern || customLabelTexture)) return; 
+    if (name === "texture_area" && selectedPattern) return; 
 
     if (
       name.includes("tub") ||
@@ -239,47 +194,48 @@ useEffect(() => {
       applyColorToMaterial(material, bottomColor); 
     }
   });
-}, [bottomColor, modelLoaded, selectedPattern, customLabelTexture, displayModel]);
+}, [bottomColor, modelLoaded, selectedPattern]);
+  // Apply pattern texture ONLY to "texture_area"
+  useEffect(() => {
+    if (!selectedPattern || !modelLoaded || !modelRef.current) return;
 
+    const mv = modelRef.current;
+    const materials = mv.model?.materials || [];
 
+    (async () => {
+      try {
+        // Load pattern
+        const texture = await mv.createTexture(selectedPattern);
+        if (!texture) {
+          console.error("Pattern texture creation failed");
+          return;
+        }
 
-// Apply Pattern OR Custom Label to "texture_area"
-useEffect(() => {
-  // Determine which texture to use (Custom takes priority, or fallback to Pattern)
-  const activeTexture = customLabelTexture || selectedPattern;
+        // Find texture_area material
+        const bottomMaterial = materials.find(
+          (mat) => mat.name === "texture_area"
+        );
 
-  if (!activeTexture || !modelLoaded || !modelRef.current) return;
+        if (!bottomMaterial) {
+          console.warn("Material 'texture_area' not found");
+          return;
+        }
 
-  const mv = modelRef.current;
-  
-  (async () => {
-    try {
-      const texture = await mv.createTexture(activeTexture);
-      
-      // Find the specific material area for the label (only in texture_area)
-      const targetMat = mv.model?.materials.find(m => m.name === "texture_area");
-      
-      if (targetMat) {
-          // 1. Reset base color to white so the image colors show correctly
-          targetMat.pbrMetallicRoughness.setBaseColorFactor([1, 1, 1, 1]); 
-          
-          // 2. Apply the image ONLY to texture_area
-          targetMat.pbrMetallicRoughness.baseColorTexture.setTexture(texture);
-          
-          // 3. Set material properties for a printed label look (Semi-gloss)
-          targetMat.pbrMetallicRoughness.setMetallicFactor(0.0);
-          targetMat.pbrMetallicRoughness.setRoughnessFactor(0.5);
-          
-          console.log("✓ Texture applied to texture_area only");
+        console.log("Applying pattern to:", bottomMaterial.name);
+
+        // Reset base color to white so pattern shows properly
+        bottomMaterial.pbrMetallicRoughness.setBaseColorFactor([1, 1, 1, 1]);
+
+        // Apply the texture
+        bottomMaterial.pbrMetallicRoughness.baseColorTexture.setTexture(texture);
+
+        console.log("Pattern applied successfully!");
+
+      } catch (error) {
+        console.error("Error applying pattern:", error);
       }
-    } catch (e) { 
-        console.error("Error applying texture:", e); 
-    }
-  })();
-}, [selectedPattern, customLabelTexture, modelLoaded, displayModel]);
-
-
-
+    })();
+  }, [selectedPattern, modelLoaded]);
 
   const handleLabelUpload = (e) => {
     const file = e.target.files?.[0];
@@ -288,36 +244,10 @@ useEffect(() => {
     const reader = new FileReader();
     reader.onload = (event) => {
       setLabelUrl(event.target.result);
-      // Clear custom label texture to avoid conflicts
-      setCustomLabelTexture(null);
     };
     reader.readAsDataURL(file);
   };
 
-const handleExportGLB = async () => {
-    const mv = modelRef.current;
-    if(!mv) return;
-    const blob = await mv.exportScene();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = "container-model.glb";
-    a.click();
-};
-
-const handleExportPDF = async () => {
-    // Capture the entire body or a specific element
-    const element = document.body; 
-    const canvas = await html2canvas(element);
-    const imgData = canvas.toDataURL('image/png');
-    
-    const pdf = new jsPDF('l', 'mm', 'a4'); // Landscape, mm, A4 size
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
-    
-    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-    pdf.save("design-snapshot.pdf");
-};
   // Apply label texture
   useEffect(() => {
     if (!labelUrl || !modelLoaded || !modelRef.current) return;
@@ -333,7 +263,7 @@ const handleExportPDF = async () => {
           return;
         }
 
-        // Find EXACT material named bottom_logo (do NOT apply to texture_area)
+        // Find EXACT material named bottom_logo
         const targetMaterial = materials.find(
           (mat) => mat.name === "bottom_logo"
         );
@@ -343,18 +273,14 @@ const handleExportPDF = async () => {
           return;
         }
 
-        console.log("Applying logo to:", targetMaterial.name);
+        console.log("Applying label to:", targetMaterial.name);
 
-        // Apply texture to logo material
+        // Apply texture
         targetMaterial.pbrMetallicRoughness.baseColorTexture.setTexture(texture);
-        
-        // Keep logo properties consistent
-        targetMaterial.pbrMetallicRoughness.setMetallicFactor(0.0);
-        targetMaterial.pbrMetallicRoughness.setRoughnessFactor(0.0);
 
-        console.log("Logo applied successfully!");
+        console.log("Label applied successfully!");
       } catch (err) {
-        console.error("Error applying logo texture:", err);
+        console.error("Error applying label texture:", err);
       }
     })();
   }, [labelUrl, modelLoaded]);
@@ -365,22 +291,10 @@ const handleExportPDF = async () => {
     // Reset pattern when model changes
     setSelectedPattern(null);
   };
-
-  // ✅ RENDER LOGIC: Check currentView BEFORE returning JSX
-  if (currentView === "label") {
-    return (
-        <Label 
-            onBack={() => setCurrentView("home")} 
-            onApply={(generatedImage) => {
-                setCustomLabelTexture(generatedImage);
-                setSelectedPattern(null);
-                setCurrentView("home");
-            }}
-        />
-    );
-  }
-
-  // Otherwise, return the main 3D viewer
+// useEffect(() => {
+//   if (!topColor) return; // DO NOT RUN if user hasn't picked a color yet
+//   // ... rest of code
+// }, [topColor, modelLoaded]);
   return (
     <div className="flex gap-[2vw] h-screen bg-gray-50 p-[1vw]">
       {/* LEFT SIDE - CONTROLS */}
@@ -486,7 +400,7 @@ const handleExportPDF = async () => {
         <div className="border-t border-gray-300"></div>
 
         {/* PATTERN PRESETS */}
-        {/* <div className="absolute top-[1vw] right-[2vw] w-[30vw] z-22 ">
+        <div className="absolute top-[1vw] right-[2vw] w-[30vw] z-22 ">
           <h3 className="text-[1vw] font-bold text-gray-700 mb-[1vw]">
             Choose Pattern Preset
           </h3>
@@ -509,51 +423,8 @@ const handleExportPDF = async () => {
               </button>
             ))}
           </div>
-        </div> */}
-
-        <div>
-            <label className="block text-[1vw] font-bold text-gray-700 mb-[0.8vw]">Label Design</label>
-            
-            <button 
-                onClick={() => setCurrentView("label")}
-                className="w-full py-[0.8vw] bg-blue-600 text-white rounded-[0.5vw] text-[1.1vw] font-bold shadow-md hover:shadow-lg hover:bg-blue-700 cursor-pointer transition-all"
-            >
-                 Customize Your Label
-            </button>
-
-            {/* Active Label Indicator */}
-            {customLabelTexture && (
-                <div className="mt-[0.8vw] bg-green-50 border border-green-200 p-[0.5vw] rounded flex justify-between items-center">
-                    <span className="text-green-700 text-[0.8vw] font-bold">✓ Custom Label Applied</span>
-                    <button onClick={() => setCustomLabelTexture(null)} className="text-blue-500 text-[0.8vw] hover:underline cursor-pointer">Remove</button>
-                </div>
-            )}
         </div>
 
-
-        <div className="mt-[1vw]">
-          <h3 className="text-[1vw] font-bold text-gray-700 mb-[0.5vw]">Or Choose Pattern</h3>
-          <div className="grid grid-cols-3 gap-[0.6vw]">
-            {patterns.map((pattern, i) => (
-              <button
-                key={i}
-                onClick={() => { setSelectedPattern(pattern); setCustomLabelTexture(null); }}
-                className={`h-[3.5vw] border-2 rounded-[0.4vw] overflow-hidden transition-all ${
-                  selectedPattern === pattern
-                    ? "border-indigo-600 scale-105 shadow-md"
-                    : "border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                <img
-                  src={pattern}
-                  alt="Pattern"
-                  className="w-full h-full object-cover"
-                />
-              </button>
-            ))}
-          </div>
-        </div>
-        
         {/* UPLOAD LOGO */}
         <div>
           <label className="block text-[1vw] font-bold text-gray-700 mb-[1vw]">
@@ -579,34 +450,19 @@ const handleExportPDF = async () => {
       </div>
 
       {/* RIGHT SIDE - MODEL VIEWER */}
-      <div className="flex-1 mt-[6vw] bg-gray-200 rounded-[.5vw] shadow-lg overflow-hidden relative">
+      <div className="flex-1 mt-[6vw] bg-gray-200 rounded-[.5vw] shadow-lg overflow-hidden">
        <model-viewer
   ref={modelRef}
-  src={displayModel}
+  src={selectedModel}
   alt="Container"
   camera-controls
   shadow-intensity="1" 
   shadow-softness="1"
-  exposure="1"
+  exposure="1.0"
   tone-mapping="commerce"
- 
-  style={{ width: "100%", height: "100%", backgroundColor: bgColor }}
+  environment-image="neutral"
+  style={{ width: "100%", height: "100%" }}
 />
-        
-        {/* Background Color Picker (Bottom Right) */}
-        <div className="absolute bottom-[2vw] right-[2vw]  bg-white rounded-[0.8vw] shadow-lg p-[1.2vw] flex items-center gap-[0.6vw] z-50">
-          <label className="text-[0.9vw] font-bold text-gray-700">BG Color</label>
-          <div className="flex flex-col">
-          <input
-            type="color"
-            value={bgColor}
-            onChange={(e) => setBgColor(e.target.value)}
-            className="w-[3vw] h-[2.5vw] rounded-[0.5vw] cursor-pointer "
-          />
-          <span className="text-[0.75vw] text-gray-500 font-mono text-center">{bgColor}</span>
-          </div>
-          
-        </div>
       </div>
     </div>
   );
